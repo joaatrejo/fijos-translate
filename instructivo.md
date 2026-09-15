@@ -1,43 +1,38 @@
-# Guía paso a paso: App traductor con modo conversación en vivo
+# Instructivo: cómo armar la app Fijos Translate
 
-Stack elegido: **Flutter (Dart)** + paquete `speech_to_text` (voz→texto) + paquete `flutter_tts` (texto→voz) + **Google Cloud Translation API** (traducción).
+Esta app se hace con **Flutter (Dart)**. Usa el micrófono para escuchar, una API para traducir, y lee la traducción en voz alta. La idea general es un ciclo:
 
-La lógica general de la app va a ser un ciclo:
-**Persona A habla → se convierte a texto → se traduce → se lee en voz alta en el idioma de Persona B → y viceversa.**
+**Persona A habla → se convierte a texto → se traduce → se escucha en el idioma de Persona B → y al revés.**
 
 ---
 
 ## Paso 0 — Instalar lo necesario
 
-1. **Flutter SDK**: bajalo de flutter.dev e instalalo siguiendo la guía para tu sistema operativo (Windows/Mac/Linux). Al final corré `flutter doctor` en una terminal — te va a decir qué falta (por ejemplo, Android Studio para el emulador/SDK de Android).
-2. **Android Studio** (aunque programemos en VS Code): lo necesitás igual porque trae el Android SDK y las herramientas para conectar un celular real.
-3. **VS Code**: instalá las extensiones **Flutter** y **Dart** desde el marketplace (buscá "Flutter" — la extensión de Dart se instala sola como dependencia).
-
-**Por qué esto:** Flutter es el "motor" que convierte tu código Dart en una app nativa. VS Code con la extensión Flutter te da autocompletado, botón de "run", y hot reload (ver los cambios al instante sin reiniciar la app).
+1. **Flutter SDK**: bajalo de flutter.dev e instalalo. Al final corré `flutter doctor` en la terminal — te dice qué falta.
+2. **Android Studio**: aunque programemos en VS Code, lo necesitamos porque trae el Android SDK (para poder instalar la app en un celular).
+3. **VS Code**: instalá las extensiones **Flutter** y **Dart** (buscalas en el marketplace de VS Code; la de Dart se instala sola).
 
 ---
 
 ## Paso 1 — Crear el proyecto
 
-En la terminal de VS Code:
+En la terminal:
 
 ```bash
-flutter create traductor_app
-cd traductor_app
+flutter create fijos_translate
+cd fijos_translate
 code .
 ```
 
-Esto genera una estructura de carpetas. Las que nos importan:
-- `lib/main.dart` → acá va todo nuestro código Dart (la lógica y las pantallas).
-- `pubspec.yaml` → acá se declaran las librerías externas (paquetes) que usamos.
-
-**Lógica:** Flutter organiza todo en "widgets" (bloques de UI que se combinan). Todo lo que ves en pantalla — un botón, un texto, una pantalla entera — es un widget.
+Carpetas importantes:
+- `lib/main.dart` → acá va todo nuestro código.
+- `pubspec.yaml` → acá se declaran las librerías (paquetes) que usa la app.
 
 ---
 
-## Paso 2 — Agregar las librerías (paquetes)
+## Paso 2 — Agregar las librerías
 
-Abrí `pubspec.yaml` y agregá estas líneas dentro de `dependencies:`
+Abrí `pubspec.yaml` y agregá esto dentro de `dependencies:`
 
 ```yaml
 dependencies:
@@ -49,32 +44,32 @@ dependencies:
   permission_handler: ^11.3.1
 ```
 
-Guardá y corré en la terminal:
+Guardá y corré:
 ```bash
 flutter pub get
 ```
 
-**Qué hace cada uno:**
-- `speech_to_text`: escucha el micrófono y devuelve lo que la persona dijo, como texto.
-- `flutter_tts`: toma un texto y lo "lee" en voz alta (text-to-speech).
-- `http`: nos deja hacer pedidos a la API de traducción por internet.
-- `permission_handler`: pide permiso de micrófono al usuario (obligatorio en Android/iOS).
+Qué hace cada una:
+- `speech_to_text`: escucha el micrófono y devuelve lo que se dijo, como texto.
+- `flutter_tts`: lee un texto en voz alta.
+- `http`: nos deja pedirle la traducción a la API por internet.
+- `permission_handler`: pide permiso de micrófono (obligatorio en Android/iOS).
 
 ---
 
 ## Paso 3 — Conseguir la API Key de traducción
 
-1. Andá a Google Cloud Console → creá un proyecto → activá la **Cloud Translation API**.
+1. Entrá a Google Cloud Console → creá un proyecto → activá la **Cloud Translation API**.
 2. Generá una **API Key** en "Credenciales".
-3. Google da una capa gratuita mensual (suficiente para un proyecto escolar), pero **ojo**: no subas esta key a un repositorio público de GitHub. La vamos a guardar en una variable separada.
+3. Google tiene una capa gratuita mensual, suficiente para el proyecto. **No subas esta key a GitHub** — la vamos a guardar en un archivo aparte que no se sube al repo (ver README).
 
-**Lógica:** la traducción no la hace tu celular — tu app le manda el texto a un servidor de Google por internet, y el servidor te devuelve la traducción. Por eso hace falta conexión a internet y una key que te identifica como el que hace el pedido.
+La traducción no la hace el celular: la app le manda el texto a un servidor de Google por internet y este devuelve la traducción. Por eso hace falta conexión y la API Key (te identifica como quien hace el pedido).
 
 ---
 
-## Paso 4 — Estructura base de `main.dart`
+## Paso 4 — Pantalla base
 
-Reemplazá todo el contenido de `lib/main.dart` por esto (lo vamos a ir completando):
+Reemplazá el contenido de `lib/main.dart` por esto:
 
 ```dart
 import 'package:flutter/material.dart';
@@ -93,7 +88,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Traductor en Vivo',
+      title: 'Fijos Translate',
       home: const ConversationScreen(),
     );
   }
@@ -114,14 +109,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
   String _textoReconocido = '';
   String _textoTraducido = '';
 
-  // Idioma de cada persona. A y B hablan distinto.
   String _idiomaA = 'es-AR'; // Español (Argentina)
   String _idiomaB = 'en-US'; // Inglés
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Traductor en Vivo')),
+      appBar: AppBar(title: const Text('Fijos Translate')),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -131,7 +125,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
             Text('Traducción: $_textoTraducido'),
             const SizedBox(height: 40),
             ElevatedButton(
-              onPressed: () {}, // acá va la lógica del Paso 5
+              onPressed: () {}, // se completa en el Paso 5
               child: Text(_isListening ? 'Escuchando...' : 'Hablar (Persona A)'),
             ),
           ],
@@ -142,16 +136,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
 }
 ```
 
-**Explicación de la lógica:**
-- `StatelessWidget` (`MyApp`) es un widget que no cambia — solo arranca la app.
-- `StatefulWidget` (`ConversationScreen`) sí cambia con el tiempo (el texto que se va actualizando cuando alguien habla), por eso tiene un `State` asociado con variables (`_textoReconocido`, `_isListening`, etc.) que al modificarse redibujan la pantalla.
-- El `_idiomaA` y `_idiomaB` son las dos variables clave: van a definir a quién le toca hablar y a qué idioma traducir.
+**Ideas clave de este código:**
+- `MyApp` solo arranca la app y no cambia nunca — por eso es `StatelessWidget`.
+- `ConversationScreen` sí cambia (el texto se va actualizando), por eso es `StatefulWidget` y tiene variables (`_textoReconocido`, `_isListening`, etc.) que al modificarse redibujan la pantalla.
+- `_idiomaA` y `_idiomaB` son las dos variables clave: definen entre qué idiomas se traduce.
 
 ---
 
 ## Paso 5 — Escuchar el micrófono (voz → texto)
 
-Agregá este método dentro de `_ConversationScreenState` (debajo de las variables, antes de `build`):
+Agregá este método dentro de la clase, antes del `build`:
 
 ```dart
 void _escuchar(String idiomaOrigen, String idiomaDestino) async {
@@ -173,19 +167,19 @@ void _escuchar(String idiomaOrigen, String idiomaDestino) async {
 }
 ```
 
-**Lógica paso a paso:**
-1. `_speech.initialize()` prepara el micrófono y pide permiso si hace falta.
-2. `_speech.listen()` empieza a grabar y va llamando a `onResult` cada vez que reconoce algo nuevo (por eso `_textoReconocido` se actualiza en vivo, palabra por palabra).
-3. Cuando `resultado.finalResult` es `true`, significa que la persona terminó de hablar (hizo una pausa) → ahí frenamos el micrófono y mandamos el texto a traducir.
+Cómo funciona:
+1. `_speech.initialize()` prepara el micrófono (y pide permiso si hace falta).
+2. `_speech.listen()` empieza a grabar y va actualizando `_textoReconocido` mientras la persona habla.
+3. Cuando `finalResult` es `true` (la persona hizo una pausa, terminó de hablar), frenamos el micrófono y mandamos el texto a traducir.
 
-Y cambiá el botón del Paso 4 para que llame a esto:
+Y en el botón del Paso 4, cambiá `onPressed: () {}` por:
 ```dart
 onPressed: () => _escuchar(_idiomaA, _idiomaB),
 ```
 
 ---
 
-## Paso 6 — Traducir el texto (llamada a la API)
+## Paso 6 — Traducir y leer en voz alta
 
 Agregá este método (reemplazá `TU_API_KEY` por la tuya del Paso 3):
 
@@ -212,46 +206,45 @@ Future<void> _traducirYHablar(String texto, String idiomaOrigen, String idiomaDe
 }
 ```
 
-**Lógica paso a paso:**
-1. Armamos la URL del servicio de Google, con nuestra API key.
-2. `http.post` manda el texto (`q`) y el idioma al que queremos traducir (`target`).
-3. La respuesta llega en formato JSON (texto estructurado); `jsonDecode` lo convierte en un mapa de Dart para poder "entrar" a `datos['data']['translations'][0]['translatedText']` y sacar la traducción.
-4. `_tts.speak()` lee en voz alta la traducción, en el idioma de la Persona B.
+Cómo funciona:
+1. Armamos la URL de la API de Google con nuestra key.
+2. Le mandamos el texto (`q`) y a qué idioma traducir (`target`).
+3. La respuesta viene en JSON; `jsonDecode` la convierte en algo que Dart puede leer, y de ahí sacamos la traducción.
+4. `_tts.speak()` lee la traducción en voz alta, en el idioma de la Persona B.
 
 ---
 
-## Paso 7 — Que la conversación sea de ida y vuelta
+## Paso 7 — Que sea de ida y vuelta
 
-Para que no sea solo A→B sino una conversación real, agregá un segundo botón para que hable la Persona B, y una variable que indique de quién es el turno:
+Para que la Persona B también pueda hablar, agregá un segundo botón en el `build()`, junto al anterior:
 
 ```dart
-// Agregar junto a los otros botones en el build():
 ElevatedButton(
   onPressed: () => _escuchar(_idiomaB, _idiomaA),
   child: const Text('Hablar (Persona B)'),
 ),
 ```
 
-**Lógica:** es el mismo método `_escuchar`, pero invertimos qué idioma es el "origen" y cuál el "destino". Así cada persona tiene su propio botón, y la traducción siempre va hacia el idioma de la otra.
+Es el mismo método `_escuchar` de antes, pero con el origen y el destino invertidos. Así cada persona tiene su botón, y la traducción siempre va hacia el idioma del otro.
 
 ---
 
 ## Paso 8 — Probar en un celular real
 
-1. Activá "Opciones de desarrollador" en tu Android (Ajustes → Acerca del teléfono → tocar 7 veces en "Número de compilación").
+1. Activá "Opciones de desarrollador" en el Android: Ajustes → Acerca del teléfono → tocar 7 veces "Número de compilación".
 2. Dentro de Opciones de desarrollador, activá "Depuración USB".
-3. Conectá el celular a la compu por cable, aceptá el permiso que aparece en la pantalla del celular.
-4. En VS Code, abajo a la derecha vas a ver el nombre de tu dispositivo (si no aparece, corré `flutter devices` en la terminal).
-5. Apretá F5 (o el botón ▶️ de Flutter) — la app se instala y abre sola en tu celular.
+3. Conectá el celular por cable y aceptá el permiso que aparece en la pantalla.
+4. En VS Code, abajo a la derecha debería aparecer el nombre del celular (si no, corré `flutter devices`).
+5. Apretá F5 o el botón ▶️ — la app se instala y abre sola.
 
-**Nota sobre permisos:** la primera vez que la app pida el micrófono, Android va a mostrar un cartel de permiso — hay que aceptarlo o el reconocimiento de voz no va a funcionar.
+La primera vez que la app pida el micrófono, Android va a mostrar un permiso: hay que aceptarlo o el reconocimiento de voz no funciona.
 
 ---
 
-## Qué sigue (para ir sumando de a poco)
+## Qué sigue
 
-- Agregar el diseño de "doble burbuja de chat" (guardar un historial de mensajes en una lista y mostrarlos como en WhatsApp).
-- Detección automática de idioma (en vez de fijar A y B, que la API detecte qué idioma se habló).
-- Manejo de errores (sin internet, sin permiso de micrófono, API sin respuesta).
+- Historial de mensajes tipo chat (guardar cada traducción en una lista y mostrarla como burbujas).
+- Detección automática de idioma, en vez de fijar A y B de antemano.
+- Manejo de errores: sin internet, sin permiso de micrófono, o la API no responde.
 
-Cualquiera de estos lo podemos encarar paso a paso como hicimos con lo de arriba — avisame por cuál seguimos.
+Se puede encarar cada uno de a uno, con el mismo nivel de detalle que los pasos de arriba.
