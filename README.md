@@ -80,9 +80,7 @@ pubspec.yaml           # Dependencias del proyecto
 
 - Joaquín Trejo
 - Ian Acosta
-- Octavio Bambini
 - Facundo Rodríguez
-- Ciro Cafaratti
 
 ## 📄 Licencia
 
