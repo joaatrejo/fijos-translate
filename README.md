@@ -82,9 +82,8 @@ instructivo.md                              # Paso a paso para armar la app
 
 - Joaquín Trejo
 - Ian Acosta
-- Octavio Bambini
 - Facundo Rodríguez
-- Ciro Cafaratti
+- Octavio Bambini
 
 ## 📄 Licencia
 
