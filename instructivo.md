@@ -1,8 +1,10 @@
 # Instructivo: cómo armar la app Fijos Translate
 
-Esta app se hace con **Flutter (Dart)**. Usa el micrófono para escuchar, una API para traducir, y lee la traducción en voz alta. La idea general es un ciclo:
+Esta app se hace con **Flutter (Dart)**. Usa el micrófono para escuchar, **Google ML Kit** para traducir (la traducción se hace dentro del celular, sin API key ni tarjeta) y lee la traducción en voz alta. La idea general es un ciclo:
 
 **Persona A habla → se convierte a texto → se traduce → se escucha en el idioma de Persona B → y al revés.**
+
+> ℹ️ No hace falta usar Google Cloud Console ni crear ninguna API Key.
 
 ---
 
@@ -32,38 +34,41 @@ Carpetas importantes:
 
 ## Paso 2 — Agregar las librerías
 
-Abrí `pubspec.yaml` y agregá esto dentro de `dependencies:`
+En la terminal, dentro de la carpeta del proyecto:
 
-```yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  speech_to_text: ^7.0.0
-  flutter_tts: ^4.0.2
-  http: ^1.2.0
-  permission_handler: ^11.3.1
-```
-
-Guardá y corré:
 ```bash
-flutter pub get
+flutter pub add speech_to_text flutter_tts google_mlkit_translation
 ```
+
+Este comando agrega los tres paquetes al `pubspec.yaml` (con la versión más nueva) y los descarga. Si ya habían agregado `http` o `permission_handler` en una versión anterior de esta guía, borren esas líneas del `pubspec.yaml`: ya no se usan.
 
 Qué hace cada una:
 - `speech_to_text`: escucha el micrófono y devuelve lo que se dijo, como texto.
 - `flutter_tts`: lee un texto en voz alta.
-- `http`: nos deja pedirle la traducción a la API por internet.
-- `permission_handler`: pide permiso de micrófono (obligatorio en Android/iOS).
+- `google_mlkit_translation`: traduce texto directamente en el celular.
 
 ---
 
-## Paso 3 — Conseguir la API Key de traducción
+## Paso 3 — Permisos de Android
 
-1. Entrá a Google Cloud Console → creá un proyecto → activá la **Cloud Translation API**.
-2. Generá una **API Key** en "Credenciales".
-3. Google tiene una capa gratuita mensual, suficiente para el proyecto. **No subas esta key a GitHub** — la vamos a guardar en un archivo aparte que no se sube al repo (ver README).
+Android no deja usar el micrófono si la app no lo declara. Abrí `android/app/src/main/AndroidManifest.xml` y agregá estas líneas **dentro de `<manifest>`**, antes de `<application ...>`:
 
-La traducción no la hace el celular: la app le manda el texto a un servidor de Google por internet y este devuelve la traducción. Por eso hace falta conexión y la API Key (te identifica como quien hace el pedido).
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO"/>
+<uses-permission android:name="android.permission.INTERNET"/>
+
+<queries>
+    <intent>
+        <action android:name="android.speech.RecognitionService"/>
+    </intent>
+</queries>
+```
+
+- `RECORD_AUDIO`: permiso para usar el micrófono.
+- `INTERNET`: para bajar los idiomas la primera vez.
+- `<queries>`: le permite a la app encontrar el servicio de reconocimiento de voz del celular.
+
+Si al correr la app aparece un error que menciona `minSdkVersion`, abrí `android/app/build.gradle` (o `build.gradle.kts`) y subí el valor de `minSdk` al número que pida el error.
 
 ---
 
@@ -73,10 +78,9 @@ Reemplazá el contenido de `lib/main.dart` por esto:
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:google_mlkit_translation/google_mlkit_translation.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 void main() {
   runApp(const MyApp());
@@ -104,31 +108,54 @@ class ConversationScreen extends StatefulWidget {
 class _ConversationScreenState extends State<ConversationScreen> {
   final stt.SpeechToText _speech = stt.SpeechToText();
   final FlutterTts _tts = FlutterTts();
+  final OnDeviceTranslatorModelManager _modelManager =
+      OnDeviceTranslatorModelManager();
 
+  // Idiomas de cada persona (A y B hablan distinto).
+  final String _idiomaA = 'es-AR'; // Español (Argentina)
+  final String _idiomaB = 'en-US'; // Inglés
+
+  // Tabla que conecta el código corto ('es', 'en') con el idioma de ML Kit.
+  final Map<String, TranslateLanguage> _idiomasMlKit = {
+    'es': TranslateLanguage.spanish,
+    'en': TranslateLanguage.english,
+  };
+
+  bool _preparando = true; // true mientras se descargan los idiomas
   bool _isListening = false;
+  String _estado = 'Descargando idiomas...';
   String _textoReconocido = '';
   String _textoTraducido = '';
 
-  String _idiomaA = 'es-AR'; // Español (Argentina)
-  String _idiomaB = 'en-US'; // Inglés
-
   @override
   Widget build(BuildContext context) {
+    final bloqueado = _preparando || _isListening;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Fijos Translate')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('Dijiste: $_textoReconocido'),
-            const SizedBox(height: 20),
-            Text('Traducción: $_textoTraducido'),
-            const SizedBox(height: 40),
-            ElevatedButton(
-              onPressed: () {}, // se completa en el Paso 5
-              child: Text(_isListening ? 'Escuchando...' : 'Hablar (Persona A)'),
-            ),
-          ],
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(_estado, style: const TextStyle(fontStyle: FontStyle.italic)),
+              const SizedBox(height: 24),
+              Text('Dijiste: $_textoReconocido'),
+              const SizedBox(height: 20),
+              Text('Traducción: $_textoTraducido'),
+              const SizedBox(height: 40),
+              ElevatedButton(
+                onPressed: bloqueado ? null : () {}, // se conecta en el Paso 8
+                child: const Text('Hablar (Persona A)'),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: bloqueado ? null : () {}, // se conecta en el Paso 8
+                child: const Text('Hablar (Persona B)'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -138,68 +165,117 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
 **Ideas clave de este código:**
 - `MyApp` solo arranca la app y no cambia nunca — por eso es `StatelessWidget`.
-- `ConversationScreen` sí cambia (el texto se va actualizando), por eso es `StatefulWidget` y tiene variables (`_textoReconocido`, `_isListening`, etc.) que al modificarse redibujan la pantalla.
-- `_idiomaA` y `_idiomaB` son las dos variables clave: definen entre qué idiomas se traduce.
+- `ConversationScreen` sí cambia (los textos se van actualizando), por eso es `StatefulWidget`. Sus variables (`_textoReconocido`, `_estado`, etc.) redibujan la pantalla cuando las modificamos con `setState`.
+- `_idiomaA` y `_idiomaB` definen entre qué idiomas se traduce. `_idiomasMlKit` es una tabla que le dice a ML Kit qué idioma es cada código.
+- `bloqueado`: mientras se descargan los idiomas o se está escuchando, los botones quedan desactivados (`onPressed: null` desactiva un botón en Flutter).
 
 ---
 
-## Paso 5 — Escuchar el micrófono (voz → texto)
+## Paso 5 — Descargar los idiomas (ML Kit)
 
-Agregá este método dentro de la clase, antes del `build`:
+ML Kit traduce dentro del celular, pero antes necesita tener cada idioma descargado (unos 30 MB por idioma). Se hace una sola vez, con internet. Agregá esto dentro de la clase `_ConversationScreenState`, antes del `build`:
 
 ```dart
-void _escuchar(String idiomaOrigen, String idiomaDestino) async {
-  bool disponible = await _speech.initialize();
-  if (disponible) {
-    setState(() => _isListening = true);
-    _speech.listen(
-      localeId: idiomaOrigen,
-      onResult: (resultado) async {
-        setState(() => _textoReconocido = resultado.recognizedWords);
-        if (resultado.finalResult) {
-          _speech.stop();
-          setState(() => _isListening = false);
-          await _traducirYHablar(resultado.recognizedWords, idiomaOrigen, idiomaDestino);
-        }
-      },
-    );
+@override
+void initState() {
+  super.initState();
+  _prepararIdiomas();
+}
+
+Future<void> _prepararIdiomas() async {
+  try {
+    for (final idioma in _idiomasMlKit.values) {
+      final yaDescargado = await _modelManager.isModelDownloaded(idioma.bcpCode);
+      if (!yaDescargado) {
+        await _modelManager.downloadModel(idioma.bcpCode);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _preparando = false;
+      _estado = 'Listo para traducir';
+    });
+  } catch (e) {
+    if (!mounted) return;
+    setState(() {
+      _estado = 'No se pudieron descargar los idiomas. Revisá internet.';
+    });
   }
 }
 ```
 
 Cómo funciona:
-1. `_speech.initialize()` prepara el micrófono (y pide permiso si hace falta).
-2. `_speech.listen()` empieza a grabar y va actualizando `_textoReconocido` mientras la persona habla.
-3. Cuando `finalResult` es `true` (la persona hizo una pausa, terminó de hablar), frenamos el micrófono y mandamos el texto a traducir.
-
-Y en el botón del Paso 4, cambiá `onPressed: () {}` por:
-```dart
-onPressed: () => _escuchar(_idiomaA, _idiomaB),
-```
+1. `initState` se ejecuta una sola vez, cuando se abre la pantalla, y llama a `_prepararIdiomas`.
+2. Por cada idioma de la tabla, `isModelDownloaded` pregunta si ya está en el celular; si no, `downloadModel` lo baja.
+3. Cuando termina, `_preparando` pasa a `false` y los botones se activan. Si falla (por ejemplo, sin internet), se avisa en pantalla.
+4. `if (!mounted) return;` evita errores si el usuario cierra la pantalla mientras se descarga.
 
 ---
 
-## Paso 6 — Traducir y leer en voz alta
+## Paso 6 — Escuchar el micrófono (voz → texto)
 
-Agregá este método (reemplazá `TU_API_KEY` por la tuya del Paso 3):
+Agregá este método en la misma clase:
 
 ```dart
-Future<void> _traducirYHablar(String texto, String idiomaOrigen, String idiomaDestino) async {
-  if (texto.isEmpty) return;
+void _escuchar(String idiomaOrigen, String idiomaDestino) async {
+  final disponible = await _speech.initialize();
+  if (!disponible) {
+    setState(() => _estado = 'No se pudo usar el micrófono. Revisá permisos.');
+    return;
+  }
 
-  const apiKey = 'TU_API_KEY';
-  final codigoDestino = idiomaDestino.split('-')[0]; // ej: 'en-US' -> 'en'
-
-  final url = Uri.parse('https://translation.googleapis.com/language/translate/v2?key=$apiKey');
-  final respuesta = await http.post(url, body: {
-    'q': texto,
-    'target': codigoDestino,
+  setState(() {
+    _isListening = true;
+    _estado = 'Escuchando...';
   });
 
-  final datos = jsonDecode(respuesta.body);
-  final traduccion = datos['data']['translations'][0]['translatedText'];
+  _speech.listen(
+    localeId: idiomaOrigen,
+    onResult: (resultado) async {
+      setState(() => _textoReconocido = resultado.recognizedWords);
+      if (resultado.finalResult) {
+        await _speech.stop();
+        setState(() => _isListening = false);
+        await _traducirYHablar(resultado.recognizedWords, idiomaOrigen, idiomaDestino);
+      }
+    },
+  );
+}
+```
 
-  setState(() => _textoTraducido = traduccion);
+Cómo funciona:
+1. `_speech.initialize()` prepara el micrófono (y pide permiso la primera vez).
+2. `_speech.listen()` empieza a grabar y llama a `onResult` cada vez que reconoce algo nuevo, por eso el texto aparece mientras la persona habla.
+3. Cuando `finalResult` es `true` (la persona hizo una pausa), frenamos el micrófono y mandamos el texto a traducir.
+
+---
+
+## Paso 7 — Traducir y leer en voz alta
+
+Agregá estos dos métodos:
+
+```dart
+Future<String> _traducir(String texto, String idiomaOrigen, String idiomaDestino) async {
+  final traductor = OnDeviceTranslator(
+    sourceLanguage: _idiomasMlKit[idiomaOrigen.split('-')[0]]!,
+    targetLanguage: _idiomasMlKit[idiomaDestino.split('-')[0]]!,
+  );
+  final traduccion = await traductor.translateText(texto);
+  await traductor.close();
+  return traduccion;
+}
+
+Future<void> _traducirYHablar(String texto, String idiomaOrigen, String idiomaDestino) async {
+  if (texto.isEmpty) {
+    setState(() => _estado = 'No se escuchó nada, probá de nuevo.');
+    return;
+  }
+
+  final traduccion = await _traducir(texto, idiomaOrigen, idiomaDestino);
+  setState(() {
+    _textoTraducido = traduccion;
+    _estado = 'Listo para traducir';
+  });
 
   await _tts.setLanguage(idiomaDestino);
   await _tts.speak(traduccion);
@@ -207,29 +283,32 @@ Future<void> _traducirYHablar(String texto, String idiomaOrigen, String idiomaDe
 ```
 
 Cómo funciona:
-1. Armamos la URL de la API de Google con nuestra key.
-2. Le mandamos el texto (`q`) y a qué idioma traducir (`target`).
-3. La respuesta viene en JSON; `jsonDecode` la convierte en algo que Dart puede leer, y de ahí sacamos la traducción.
-4. `_tts.speak()` lee la traducción en voz alta, en el idioma de la Persona B.
+1. `idiomaOrigen.split('-')[0]` convierte `'es-AR'` en `'es'`, que es la clave de nuestra tabla `_idiomasMlKit`.
+2. `OnDeviceTranslator` es el traductor de ML Kit: se crea con un idioma de origen y uno de destino, y `translateText` devuelve el texto traducido. No hay pedidos a internet ni API Key.
+3. `traductor.close()` libera la memoria cuando terminamos.
+4. `_tts.speak()` lee la traducción en voz alta, en el idioma de la otra persona.
 
 ---
 
-## Paso 7 — Que sea de ida y vuelta
+## Paso 8 — Conectar los botones (ida y vuelta)
 
-Para que la Persona B también pueda hablar, agregá un segundo botón en el `build()`, junto al anterior:
+En el `build()`, cambiá los dos `onPressed` del Paso 4 por estos:
 
 ```dart
-ElevatedButton(
-  onPressed: () => _escuchar(_idiomaB, _idiomaA),
-  child: const Text('Hablar (Persona B)'),
-),
+// Botón de la Persona A
+onPressed: bloqueado ? null : () => _escuchar(_idiomaA, _idiomaB),
+
+// Botón de la Persona B
+onPressed: bloqueado ? null : () => _escuchar(_idiomaB, _idiomaA),
 ```
 
-Es el mismo método `_escuchar` de antes, pero con el origen y el destino invertidos. Así cada persona tiene su botón, y la traducción siempre va hacia el idioma del otro.
+Es el mismo método `_escuchar`, pero con el origen y el destino invertidos. Así cada persona tiene su botón, y la traducción siempre va hacia el idioma del otro.
+
+> El código completo de todo el archivo está en [`lib/main.dart`](./lib/main.dart) del repositorio, por si quieren compararlo con el suyo.
 
 ---
 
-## Paso 8 — Probar en un celular real
+## Paso 9 — Probar en un celular real
 
 1. Activá "Opciones de desarrollador" en el Android: Ajustes → Acerca del teléfono → tocar 7 veces "Número de compilación".
 2. Dentro de Opciones de desarrollador, activá "Depuración USB".
@@ -237,14 +316,17 @@ Es el mismo método `_escuchar` de antes, pero con el origen y el destino invert
 4. En VS Code, abajo a la derecha debería aparecer el nombre del celular (si no, corré `flutter devices`).
 5. Apretá F5 o el botón ▶️ — la app se instala y abre sola.
 
-La primera vez que la app pida el micrófono, Android va a mostrar un permiso: hay que aceptarlo o el reconocimiento de voz no funciona.
+Qué esperar:
+- La **primera vez**, la app dice "Descargando idiomas..." y los botones están desactivados. Necesita internet y puede tardar un poco. Cuando dice "Listo para traducir", ya se puede usar.
+- Android va a pedir permiso de micrófono: hay que aceptarlo o el reconocimiento de voz no funciona.
+- La traducción en sí funciona sin internet una vez descargados los idiomas. El **reconocimiento de voz** de Android, en cambio, normalmente sí usa internet, salvo que el celular tenga descargado el idioma para uso sin conexión.
 
 ---
 
 ## Qué sigue
 
 - Historial de mensajes tipo chat (guardar cada traducción en una lista y mostrarla como burbujas).
-- Detección automática de idioma, en vez de fijar A y B de antemano.
-- Manejo de errores: sin internet, sin permiso de micrófono, o la API no responde.
+- Más idiomas: se agregan en la tabla `_idiomasMlKit` y en las variables `_idiomaA` / `_idiomaB`.
+- Selector de idiomas en la pantalla, en vez de fijarlos en el código.
 
 Se puede encarar cada uno de a uno, con el mismo nivel de detalle que los pasos de arriba.
